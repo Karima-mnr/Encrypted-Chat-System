@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import dbConnect from '@/lib/mongodb';
-import User from '@/models/User';
+import dbConnect from '@/src/lib/mongodb';
+import User from '@/src/models/User';
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,14 +16,21 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    console.log('🔍 Fetching public key for username:', username);
+
     const user = await User.findOne({ username });
 
     if (!user) {
+      console.error('❌ User not found:', username);
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
       );
     }
+
+    console.log('✅ Found user:', user.username);
+    console.log('🔑 Has public key:', !!user.publicKey);
+    console.log('📊 Public key length:', user.publicKey?.length || 0);
 
     return NextResponse.json({
       username: user.username,

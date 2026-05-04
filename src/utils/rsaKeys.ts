@@ -44,7 +44,7 @@ export async function encryptPrivateKey(privateKey: string, password: string): P
   const key = await crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt: encoder.encode('salt'),
+      salt: encoder.encode('cryptchat_salt_2024'),
       iterations: 100000,
       hash: 'SHA-256',
     },
@@ -88,7 +88,7 @@ export async function decryptPrivateKey(encryptedData: string, password: string)
   const key = await crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt: encoder.encode('salt'),
+      salt: encoder.encode('cryptchat_salt_2024'),
       iterations: 100000,
       hash: 'SHA-256',
     },

@@ -7,6 +7,8 @@ export interface IUser extends Document {
   passwordHash: string;
   role: 'user' | 'admin';
   publicKey: string | null;
+  lastKeySize: number;        // Track last key size used
+  loginCount: number;         // Track number of logins
   createdAt: Date;
   lastLogin: Date | null;
   isActive: boolean;
@@ -19,6 +21,8 @@ const UserSchema: Schema = new Schema({
   passwordHash: { type: String, required: true },
   role: { type: String, enum: ['user', 'admin'], default: 'user' },
   publicKey: { type: String, default: null },
+  lastKeySize: { type: Number, default: 512 },  // Start at 512 bits
+  loginCount: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
   lastLogin: { type: Date, default: null },
   isActive: { type: Boolean, default: true }

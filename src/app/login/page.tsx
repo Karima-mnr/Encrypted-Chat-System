@@ -15,39 +15,43 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
+const handleLogin = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setIsLoading(true);
+  setError('');
 
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
 
-      const data = await res.json();
+    const data = await res.json();
 
-      if (res.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        
-        if (data.user.role === 'admin') {
-          router.push('/dashboard');
-        } else {
-          router.push('/chat');
-        }
-      } else {
-        setError(data.error || 'Login failed');
+    if (res.ok) {
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      
+      // Store the key size for this login
+      if (data.keySize) {
+        localStorage.setItem('keySize', data.keySize.toString());
       }
-    } catch (err) {
-      setError('Connection error. Please try again.');
-    } finally {
-      setIsLoading(false);
+      
+      if (data.user.role === 'admin') {
+        router.push('/dashboard');
+      } else {
+        router.push('/chat');
+      }
+    } else {
+      setError(data.error || 'Login failed');
     }
-  };
-
+  } catch (err) {
+    setError('Connection error. Please try again.');
+  } finally {
+    setIsLoading(false);
+  }
+};
   return (
     <div className="min-h-screen bg-[#0d1117] flex items-center justify-center px-6">
       {/* Background */}
