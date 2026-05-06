@@ -34,3 +34,14 @@
 .animate-float {
   animation: float 3s ease-in-out infinite;
 }
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+  
+  html.dark {
+    color-scheme: dark;
+  }
+}
+
+

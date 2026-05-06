@@ -15,43 +15,49 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-const handleLogin = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setIsLoading(true);
-  setError('');
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
 
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
+    console.log('📤 Sending login request for:', username);
 
-    const data = await res.json();
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ username, password })
+      });
 
-    if (res.ok) {
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      
-      // Store the key size for this login
-      if (data.keySize) {
-        localStorage.setItem('keySize', data.keySize.toString());
-      }
-      
-      if (data.user.role === 'admin') {
-        router.push('/dashboard');
+      const data = await res.json();
+      console.log('📥 Response:', data);
+
+      if (res.ok && data.success) {
+        // Store user data
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        
+        console.log('✅ Login success, redirecting...');
+        
+        // Redirect based on role
+        if (data.user.role === 'admin') {
+          router.push('/dashboard');
+        } else {
+          router.push('/chat');
+        }
       } else {
-        router.push('/chat');
+        setError(data.error || 'Login failed');
       }
-    } else {
-      setError(data.error || 'Login failed');
+    } catch (err) {
+      console.error('❌ Login error:', err);
+      setError('Connection error. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
-  } catch (err) {
-    setError('Connection error. Please try again.');
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
+
   return (
     <div className="min-h-screen bg-[#0d1117] flex items-center justify-center px-6">
       {/* Background */}
@@ -88,7 +94,7 @@ const handleLogin = async (e: React.FormEvent) => {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-10 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#b8d490]/50 transition"
-                  placeholder="Karima, Nour, or admin"
+                  placeholder="Enter your username"
                   required
                 />
               </div>
@@ -103,7 +109,7 @@ const handleLogin = async (e: React.FormEvent) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-10 py-3 text-white placeholder-white/30 focus:outline-none focus:border-[#b8d490]/50 transition"
-                  placeholder="••••••••"
+                  placeholder="Enter your password"
                   required
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -120,7 +126,7 @@ const handleLogin = async (e: React.FormEvent) => {
 
             <div className="text-center text-xs text-white/30">
               <p>Demo Users: Karima / Nour / admin</p>
-              <p className="text-[10px] mt-1">(Any password works)</p>
+              <p className="text-[10px] mt-1">Password: kali</p>
             </div>
 
             <button
@@ -141,6 +147,11 @@ const handleLogin = async (e: React.FormEvent) => {
             <div className="flex items-center justify-center gap-2 text-[10px] text-white/30">
               <KeyRound className="w-3 h-3" />
               <span>End-to-End Encrypted Session</span>
+            </div>
+            <div className="mt-3">
+              <Link href="/signup" className="text-xs text-white/40 hover:text-white/60 transition">
+                Don't have an account? Sign up
+              </Link>
             </div>
           </div>
         </div>

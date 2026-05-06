@@ -1,44 +1,47 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Shield, Users, KeyRound, CheckCircle, AlertCircle, LogOut, Terminal, Lock } from 'lucide-react';
-import { useSocket } from '@/src/hooks/useSocket';
-import MessageList from '@/src/components/chat/MessageList';
-import MessageInput from '@/src/components/chat/MessageInput';
+import { useState, useEffect, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Shield, Send, Lock, KeyRound, Users, LogOut, CheckCheck, Loader2, Moon, Sun, Menu, X, MessageSquare, History } from 'lucide-react';
 
 const COLOR = '#b8d490';
+const BACKEND_URL = 'http://localhost:3001';
 
 interface Message {
-  id: string;
-  from: string;
-  to: string;
-  text: string;
-  encrypted: string;
+  messageId: string;
+  fromUsername: string;
+  toUsername: string;
+  encryptedMessage: string;
+  decryptedText?: string;
   keySize: number;
-  timestamp: Date;
-  delivered?: boolean;
+  timestamp: string;
 }
 
 interface User {
   userId: string;
   username: string;
   role: string;
+  publicKey?: string;
 }
 
 export default function ChatPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [otherUser, setOtherUser] = useState<User | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [encrypting, setEncrypting] = useState(false);
-  const [messageCounter, setMessageCounter] = useState(0);
   const [users, setUsers] = useState<User[]>([]);
-  
-  const { socket, isConnected } = useSocket(currentUser?.userId || null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [socket, setSocket] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showHistoryNotice, setShowHistoryNotice] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load current user and other users
+  // Get current user from localStorage
   useEffect(() => {
     const userStr = localStorage.getItem('user');
     if (!userStr) {
@@ -48,286 +51,439 @@ export default function ChatPage() {
     const userData = JSON.parse(userStr);
     setCurrentUser(userData);
     
-    // Load all users
-    const loadUsers = async () => {
-      try {
-        const res = await fetch('/api/auth/users');
-        const data = await res.json();
-        const otherUsers = data.filter((u: User) => u.username !== userData.username);
-        setUsers(otherUsers);
-        if (otherUsers.length > 0) {
-          setOtherUser(otherUsers[0]);
-        }
-      } catch (err) {
-        console.error('Failed to load users:', err);
-        // Fallback users
-        const fallbackUsers = [
-          { userId: 'USER_002', username: 'Nour', role: 'user' }
-        ];
-        setUsers(fallbackUsers);
-        setOtherUser(fallbackUsers[0]);
-      }
-    };
-    
-    loadUsers();
-    setIsLoading(false);
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme) {
+      setIsDarkMode(savedTheme === 'dark');
+    }
   }, []);
 
-  // Generate private key if not exists
+  // Load users and initialize
   useEffect(() => {
-    const initKeys = async () => {
-      if (!currentUser) return;
-      
-      const existingKey = localStorage.getItem(`${currentUser.username}_privateKey`);
-      if (!existingKey) {
-        const { generateRSAKeyPair, encryptPrivateKey } = await import('@/src/utils/rsaKeys');
-        const { publicKey, privateKey } = await generateRSAKeyPair(1024);
-        const encrypted = await encryptPrivateKey(privateKey, 'kali');
-        localStorage.setItem(`${currentUser.username}_privateKey`, encrypted);
-        
-        // Try to save public key to backend
-        try {
-          await fetch('/api/auth/generate-keys', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: currentUser.userId,
-              username: currentUser.username,
-              publicKey: publicKey,
-              keySize: 1024
-            })
-          });
-        } catch (err) {
-          console.error('Failed to save public key:', err);
-        }
-      }
-    };
-    
-    initKeys();
+    if (!currentUser) return;
+    loadUsers();
+    initKeysAndSocket();
   }, [currentUser]);
 
-// In the socket effect, make sure room is joined properly
-useEffect(() => {
-  if (!socket || !currentUser) return;
+  // Save theme preference
+  useEffect(() => {
+    localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
 
-  // Join room with userId
-  socket.emit('join', currentUser.userId);
-  console.log('Joined room:', currentUser.userId);
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  socket.on('receive_message', async (data) => {
-    console.log('📩 Message received via socket:', data);
-    
-    // Decrypt message
+  const loadUsers = async () => {
     try {
-      const { decryptMessage, decryptPrivateKey } = await import('@/src/utils/rsaKeys');
-      const encryptedPrivateKey = localStorage.getItem(`${currentUser.username}_privateKey`);
+      const res = await fetch(`${BACKEND_URL}/api/auth/users`);
+      const data = await res.json();
+      const others = data.filter((u: User) => u.username !== currentUser?.username);
+      setUsers(others);
       
-      if (encryptedPrivateKey) {
-        const privateKey = await decryptPrivateKey(encryptedPrivateKey, 'kali');
+      const userId = searchParams.get('id');
+      if (userId && others.length > 0) {
+        const selected = others.find((u: User) => u.userId === userId || u.username === userId);
+        if (selected) {
+          setOtherUser(selected);
+          loadMessages(selected.username);
+        } else if (others.length > 0) {
+          setOtherUser(others[0]);
+          loadMessages(others[0].username);
+        }
+      } else if (others.length > 0) {
+        setOtherUser(others[0]);
+        loadMessages(others[0].username);
+      } else {
+        setIsLoading(false);
+      }
+    } catch (err) {
+      console.error('Load users error:', err);
+      setIsLoading(false);
+    }
+  };
+
+  const loadMessages = async (withUser: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/messages/${currentUser?.username}/${withUser}`);
+      const data = await res.json();
+      
+      // Check if there are old messages
+      if (data.length > 0) {
+        setShowHistoryNotice(true);
+        // Clear old messages from database to start fresh
+        await fetch(`${BACKEND_URL}/api/messages/clear/${currentUser?.username}/${withUser}`, {
+          method: 'DELETE',
+        });
+      }
+      
+      // Only show new messages from this session
+      setMessages([]);
+      
+      // Auto-hide history notice after 3 seconds
+      setTimeout(() => {
+        setShowHistoryNotice(false);
+      }, 300000);
+      
+    } catch (err) {
+      console.error('Load messages error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const initKeysAndSocket = async () => {
+    const existingPrivateKey = localStorage.getItem('cryptchat_private_key');
+    if (!existingPrivateKey) {
+      try {
+        const { generateKeyPair, storePrivateKey } = await import('@/src/utils/rsaKeys');
+        const { publicKey, privateKey } = await generateKeyPair(1024);
+        await storePrivateKey(privateKey, 'kali');
+        
+        await fetch(`${BACKEND_URL}/api/auth/generate-keys`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: currentUser?.username,
+            publicKey: publicKey,
+            keySize: 1024
+          })
+        });
+        console.log('Keys generated');
+      } catch (err) {
+        console.error('Key generation error:', err);
+      }
+    }
+
+    const io = require('socket.io-client');
+    const sock = io(BACKEND_URL);
+    
+    sock.on('connect', () => {
+      setIsConnected(true);
+      sock.emit('join', currentUser?.username);
+    });
+    
+    sock.on('receive_message', async (data: any) => {
+      try {
+        const { decryptMessage, getPrivateKey } = await import('@/src/utils/rsaKeys');
+        const privateKey = await getPrivateKey('kali');
         const decryptedText = await decryptMessage(data.encryptedMessage, privateKey);
         
         setMessages(prev => [...prev, {
-          id: data.messageId || `msg_${Date.now()}`,
-          from: data.from,
-          to: currentUser.username,
-          text: decryptedText,
-          encrypted: data.encryptedMessage,
+          messageId: data.messageId,
+          fromUsername: data.from,
+          toUsername: currentUser?.username || '',
+          encryptedMessage: data.encryptedMessage,
+          decryptedText,
           keySize: data.keySize,
-          timestamp: new Date(data.timestamp),
-          delivered: true
+          timestamp: data.timestamp
         }]);
+      } catch (err) {
+        console.error('Receive error:', err);
       }
-    } catch (err) {
-      console.error('Decryption error:', err);
-    }
-  });
-
-  return () => {
-    socket.off('receive_message');
-  };
-}, [socket, currentUser]);
-
-  // Send message
-  const sendMessage = async (plainText: string) => {
-    if (!otherUser || !currentUser || !socket || !isConnected) return;
+    });
     
-    setEncrypting(true);
+    setSocket(sock);
+    
+    return () => sock.disconnect();
+  };
+
+  const sendMessage = async () => {
+    if (!inputMessage.trim() || !otherUser || !socket || !isConnected || isSending) return;
+    
+    setIsSending(true);
     
     try {
-      // Get recipient's public key
-      const res = await fetch(`/api/auth/get-public-key?username=${otherUser.username}`);
-      const data = await res.json();
+      const res = await fetch(`${BACKEND_URL}/api/auth/get-public-key?username=${otherUser.username}`);
+      const { publicKey } = await res.json();
       
-      let recipientPublicKey = data.publicKey;
-      
-      // If no public key in DB, use a fallback
-      if (!recipientPublicKey) {
-        console.warn('No public key found for recipient');
-        recipientPublicKey = "MIIBCgKCAQEAx2X9pL8mN4oR6sT1uV3wX5yZ7aB8cD0eF2gH4iJ6kL8mN0oP2qR4sT6uV8wX0yZ2aB4cD6eF8gH0iJ2kL4mN6oP8qR0sT2uV4wX6yZ8aB0cD2eF4gH6iJ8kL0mN2oP4qR6sT8uV0wX";
+      if (!publicKey) {
+        alert('Recipient not ready. Please wait.');
+        setIsSending(false);
+        return;
       }
       
-      // Calculate progressive key size
-      const newMessageNumber = messageCounter + 1;
-      const keySize = Math.min(128 * newMessageNumber, 4096);
-      
-      // Encrypt message
       const { encryptMessage } = await import('@/src/utils/rsaKeys');
-      const encryptedMessage = await encryptMessage(plainText, recipientPublicKey);
+      const encrypted = await encryptMessage(inputMessage, publicKey);
       
-      // Send via socket
-      const messageData = {
-        from: currentUser.username,
+      socket.emit('send_message', {
+        from: currentUser?.username,
         to: otherUser.username,
-        encryptedMessage,
-        keySize,
-        encryptionTime: 0,
-        messageNumber: newMessageNumber
-      };
+        encryptedMessage: encrypted,
+        keySize: 1024,
+        messageNumber: messages.length + 1,
+        encryptionTime: 0
+      });
       
-      socket.emit('send_message', messageData);
-      
-      // Add to local messages
       setMessages(prev => [...prev, {
-        id: `msg_${Date.now()}_${Math.random()}`,
-        from: currentUser.username,
-        to: otherUser.username,
-        text: plainText,
-        encrypted: encryptedMessage,
-        keySize,
-        timestamp: new Date(),
-        delivered: true
+        messageId: `local_${Date.now()}`,
+        fromUsername: currentUser?.username || '',
+        toUsername: otherUser.username,
+        encryptedMessage: encrypted,
+        decryptedText: inputMessage,
+        keySize: 1024,
+        timestamp: new Date().toISOString()
       }]);
       
-      setMessageCounter(newMessageNumber);
+      setInputMessage('');
     } catch (err) {
-      console.error('Failed to send message:', err);
+      console.error('Send error:', err);
+      alert('Failed to send message');
     } finally {
-      setEncrypting(false);
+      setIsSending(false);
     }
   };
 
-  // Switch conversation partner
-  const switchUser = (user: User) => {
+  const switchUser = async (user: User) => {
     setOtherUser(user);
+    router.push(`/chat?id=${user.userId}`);
+    await loadMessages(user.username);
+    if (window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
   };
 
-  // Logout
   const handleLogout = () => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
+    localStorage.clear();
     router.push('/login');
+  };
+
+  const toggleTheme = () => {
+    setIsDarkMode(!isDarkMode);
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#b8d490] border-t-transparent rounded-full animate-spin" />
+      <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-[#0d1117]' : 'bg-gray-50'}`}>
+        <Loader2 className="w-8 h-8 animate-spin" style={{ color: COLOR }} />
       </div>
     );
   }
 
-  if (!currentUser) {
-    return null;
-  }
-
   return (
-    <div className="min-h-screen bg-[#0d1117] flex">
-      {/* Sidebar */}
-      <div className="w-72 border-r border-white/10 bg-black/30 flex flex-col">
-        {/* User Info */}
-        <div className="p-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#b8d490]/10 border border-[#b8d490]/30 flex items-center justify-center">
-              <Shield className="w-5 h-5" style={{ color: COLOR }} />
+    <div className={`min-h-screen ${isDarkMode ? 'bg-[#0d1117]' : 'bg-gray-50'}`}>
+      <style jsx global>{`
+        .light-scrollbar::-webkit-scrollbar { width: 6px; }
+        .light-scrollbar::-webkit-scrollbar-track { background: #e5e7eb; border-radius: 10px; }
+        .light-scrollbar::-webkit-scrollbar-thumb { background: ${COLOR}; border-radius: 10px; }
+        .dark-scrollbar::-webkit-scrollbar { width: 6px; }
+        .dark-scrollbar::-webkit-scrollbar-track { background: #1f2a3a; border-radius: 10px; }
+        .dark-scrollbar::-webkit-scrollbar-thumb { background: ${COLOR}; border-radius: 10px; }
+      `}</style>
+
+      {/* Mobile Sidebar Toggle */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="md:hidden fixed top-4 left-4 z-50 p-2 rounded-lg transition-all"
+        style={{ 
+          background: isDarkMode ? '#1a1a1a' : '#ffffff', 
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          border: isDarkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid #e5e7eb'
+        }}
+      >
+        {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+      </button>
+
+      {/* Theme Toggle */}
+      <button
+        onClick={toggleTheme}
+        className="fixed top-4 right-4 z-50 p-2 rounded-lg transition-all"
+        style={{ 
+          background: isDarkMode ? '#1a1a1a' : '#ffffff', 
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          border: isDarkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid #e5e7eb'
+        }}
+      >
+        {isDarkMode ? <Sun className="w-5 h-5" style={{ color: '#fbbf24' }} /> : <Moon className="w-5 h-5" style={{ color: '#374151' }} />}
+      </button>
+
+      <div className="flex h-screen">
+        {/* Sidebar */}
+        <div className={`
+          fixed md:relative z-40 w-80 h-full transition-transform duration-300
+          ${isDarkMode ? 'bg-[#0d1117] border-r border-white/10' : 'bg-white border-r border-gray-200'}
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}>
+          <div className={`p-5 border-b ${isDarkMode ? 'border-white/10' : 'border-gray-200'}`}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${COLOR}15`, border: `1px solid ${isDarkMode ? `${COLOR}30` : COLOR}` }}>
+                <Shield className="w-5 h-5" style={{ color: COLOR }} />
+              </div>
+              <div className="flex-1">
+                <p className={`font-semibold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>{currentUser?.username}</p>
+                <p className={`text-xs ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>RSA Secured</p>
+              </div>
+              <button onClick={handleLogout} className={`transition-colors ${isDarkMode ? 'text-white/40 hover:text-white/70' : 'text-gray-400 hover:text-gray-600'}`}>
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
-            <div className="flex-1">
-              <p className="text-white font-medium">{currentUser.username}</p>
-              <p className="text-xs text-white/40">{currentUser.role}</p>
+            <div className="mt-3 flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+              <span className={`text-[10px] ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>
+                {isConnected ? 'Encrypted Channel Active' : 'Connecting...'}
+              </span>
             </div>
-            <button onClick={handleLogout} className="text-white/40 hover:text-white/70 transition">
-              <LogOut className="w-4 h-4" />
-            </button>
           </div>
           
-          {/* Connection Status */}
-          <div className="mt-3 flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-            <span className="text-[10px] text-white/40">
-              {isConnected ? 'Secure channel active' : 'Connecting...'}
-            </span>
-          </div>
-        </div>
-        
-        {/* Users List */}
-        <div className="flex-1 p-3">
-          <p className="text-xs text-white/40 mb-3 px-2">CONTACTS</p>
-          <div className="space-y-1">
+          <div className={`flex-1 p-3 overflow-y-auto h-[calc(100%-120px)] ${isDarkMode ? 'dark-scrollbar' : 'light-scrollbar'}`}>
+            <p className={`text-xs font-semibold ${isDarkMode ? 'text-white/40' : 'text-gray-400'} mb-3 px-2 tracking-wider`}>CONTACTS</p>
             {users.map((user) => (
               <button
                 key={user.userId}
                 onClick={() => switchUser(user)}
-                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${
+                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all mb-1 ${
                   otherUser?.username === user.username
-                    ? 'bg-[#b8d490]/10 border border-[#b8d490]/30'
-                    : 'hover:bg-white/5'
+                    ? isDarkMode 
+                      ? 'bg-[#b8d490]/15 border border-[#b8d490]/30'
+                      : 'bg-[#b8d490]/10 border border-[#b8d490]/40 shadow-sm'
+                    : isDarkMode 
+                      ? 'hover:bg-white/5' 
+                      : 'hover:bg-gray-100'
                 }`}
               >
-                <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-                  <span className="text-xs text-white/60">{user.username[0]}</span>
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`}>
+                  <span className={`text-sm font-medium ${isDarkMode ? 'text-white/70' : 'text-gray-600'}`}>{user.username[0]}</span>
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="text-sm text-white/80">{user.username}</p>
-                  <p className="text-[10px] text-white/30">online</p>
+                  <p className={`text-sm font-medium ${isDarkMode ? 'text-white/80' : 'text-gray-700'}`}>{user.username}</p>
+                  <p className={`text-[10px] ${isDarkMode ? 'text-white/30' : 'text-gray-400'}`}>
+                    {user.publicKey ? 'RSA Ready' : 'Initializing'}
+                  </p>
                 </div>
-                <Lock className="w-3 h-3 text-white/30" />
+                {user.publicKey && <Lock className="w-3 h-3" style={{ color: `${COLOR}60` }} />}
               </button>
             ))}
           </div>
         </div>
         
-        {/* Encryption Info */}
-        <div className="p-4 border-t border-white/10">
-          <div className="flex items-center gap-2 text-[10px] text-white/30">
-            <KeyRound className="w-3 h-3" style={{ color: COLOR }} />
-            <span>End-to-end encrypted</span>
-          </div>
-          <p className="text-[9px] text-white/20 mt-1">RSA-{Math.min(128 * (messageCounter + 1) || 1024, 4096)}-bit</p>
-        </div>
-      </div>
-      
-      {/* Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Chat Header */}
-        <div className="px-6 py-4 border-b border-white/10 bg-black/20">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
-              <span className="text-white/60 font-medium">{otherUser?.username?.[0] || '?'}</span>
-            </div>
-            <div>
-              <h2 className="text-white font-medium">{otherUser?.username || 'Select a contact'}</h2>
-              <div className="flex items-center gap-1 mt-0.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                <span className="text-[10px] text-white/40">Encrypted session ready</span>
+        {/* Chat Area */}
+        <div className="flex-1 flex flex-col h-screen overflow-hidden">
+          {otherUser ? (
+            <>
+              {/* Chat Header */}
+              <div className={`px-6 py-4 border-b flex-shrink-0 ${isDarkMode ? 'bg-black/30 border-white/10' : 'bg-white border-gray-200'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`}>
+                    <span className={`font-semibold ${isDarkMode ? 'text-white/70' : 'text-gray-600'}`}>{otherUser.username[0]}</span>
+                  </div>
+                  <div>
+                    <h2 className={`font-semibold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>{otherUser.username}</h2>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                      <p className={`text-[10px] ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>RSA Encrypted Session</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* History Notice */}
+              {showHistoryNotice && (
+                <div className={`mx-6 mt-4 p-3 rounded-lg flex items-center justify-center gap-2 ${
+                  isDarkMode ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-500' : 'bg-yellow-50 border border-yellow-200 text-yellow-600'
+                }`}>
+                  <History className="w-4 h-4" />
+                  <span className="text-xs font-medium">Previous messages are encrypted and cannot be recovered. New session started.</span>
+                </div>
+              )}
+              
+              {/* Messages Container */}
+              <div 
+                className={`flex-1 overflow-y-auto p-6 space-y-4 ${isDarkMode ? 'dark-scrollbar' : 'light-scrollbar'}`}
+                style={{ scrollBehavior: 'smooth' }}
+              >
+                {messages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-3">
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-gray-100'}`}>
+                      <MessageSquare className="w-8 h-8" style={{ color: `${COLOR}50` }} />
+                    </div>
+                    <p className={`text-sm font-medium ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>No messages yet</p>
+                    <p className={`text-xs ${isDarkMode ? 'text-white/20' : 'text-gray-300'}`}>Send an encrypted message to start</p>
+                  </div>
+                ) : (
+                  messages.map((msg) => {
+                    const isOwn = msg.fromUsername === currentUser?.username;
+                    const displayText = msg.decryptedText || (isOwn ? msg.decryptedText : 'Encrypted message');
+                    
+                    return (
+                      <div key={msg.messageId} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[70%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+                          {!isOwn && (
+                            <span className={`text-[10px] px-1 ${isDarkMode ? 'text-[#b8d490]/70' : 'text-[#b8d490]'}`}>
+                              {msg.fromUsername}
+                            </span>
+                          )}
+                          <div className={`rounded-2xl px-4 py-2.5 ${
+                            isOwn 
+                              ? 'text-black' 
+                              : isDarkMode 
+                                ? 'bg-white/10 border border-white/20 text-white'
+                                : 'bg-gray-200 border border-gray-300 text-gray-800'
+                          }`} style={isOwn ? { background: COLOR } : {}}>
+                            <p className="text-sm break-words">{displayText}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-1">
+                            <Lock className="w-2.5 h-2.5" style={{ color: `${COLOR}50` }} />
+                            <span className={`text-[9px] font-mono ${isDarkMode ? 'text-white/30' : 'text-gray-400'}`}>
+                              RSA-{msg.keySize || 1024}
+                            </span>
+                            {isOwn && <CheckCheck className="w-2.5 h-2.5" style={{ color: `${COLOR}50` }} />}
+                            <span className={`text-[9px] ${isDarkMode ? 'text-white/20' : 'text-gray-300'}`}>
+                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+              
+              {/* Input Area */}
+              <div className={`p-4 border-t flex-shrink-0 ${isDarkMode ? 'bg-black/30 border-white/10' : 'bg-white border-gray-200'}`}>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                    placeholder={`Type RSA encrypted message to ${otherUser?.username}...`}
+                    disabled={!isConnected || isSending}
+                    className={`flex-1 rounded-xl px-4 py-3 outline-none transition-all disabled:opacity-50 ${
+                      isDarkMode 
+                        ? 'bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-[#b8d490]/50' 
+                        : 'bg-gray-50 border border-gray-200 text-gray-800 placeholder-gray-400 focus:border-[#b8d490] focus:bg-white'
+                    }`}
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={!inputMessage.trim() || !isConnected || isSending}
+                    className="px-5 py-3 rounded-xl font-medium flex items-center gap-2 transition hover:scale-105 disabled:opacity-50"
+                    style={{ background: COLOR, color: '#0d1117' }}
+                  >
+                    {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    Send
+                  </button>
+                </div>
+                <p className={`text-[9px] text-center mt-2 ${isDarkMode ? 'text-white/20' : 'text-gray-300'}`}>
+                  End-to-end encrypted with RSA-1024
+                </p>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <Users className="w-12 h-12 mx-auto mb-3" style={{ color: `${COLOR}40` }} />
+                <p className={`text-sm ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>Select a contact to start</p>
               </div>
             </div>
-          </div>
+          )}
         </div>
-        
-        {/* Messages */}
-        {otherUser ? (
-          <>
-            <MessageList messages={messages} currentUser={currentUser.username} />
-            <MessageInput onSend={sendMessage} isConnected={isConnected} encrypting={encrypting} />
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <Users className="w-12 h-12 mx-auto mb-3 text-white/20" />
-              <p className="text-white/40 text-sm">No contacts available</p>
-              <p className="text-white/20 text-xs mt-1">Users will appear here when they register</p>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
