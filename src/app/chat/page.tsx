@@ -41,7 +41,6 @@ export default function ChatPage() {
   const [showHistoryNotice, setShowHistoryNotice] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Get current user from localStorage
   useEffect(() => {
     const userStr = localStorage.getItem('user');
     if (!userStr) {
@@ -57,14 +56,12 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Load users and initialize
   useEffect(() => {
     if (!currentUser) return;
     loadUsers();
     initKeysAndSocket();
   }, [currentUser]);
 
-  // Save theme preference
   useEffect(() => {
     localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
     if (isDarkMode) {
@@ -74,7 +71,6 @@ export default function ChatPage() {
     }
   }, [isDarkMode]);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -83,7 +79,10 @@ export default function ChatPage() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/auth/users`);
       const data = await res.json();
-      const others = data.filter((u: User) => u.username !== currentUser?.username);
+      const others = data.filter((u: User) => 
+        u.username !== currentUser?.username && 
+        u.role !== 'admin'
+      );
       setUsers(others);
       
       const userId = searchParams.get('id');
@@ -91,48 +90,15 @@ export default function ChatPage() {
         const selected = others.find((u: User) => u.userId === userId || u.username === userId);
         if (selected) {
           setOtherUser(selected);
-          loadMessages(selected.username);
         } else if (others.length > 0) {
           setOtherUser(others[0]);
-          loadMessages(others[0].username);
         }
       } else if (others.length > 0) {
         setOtherUser(others[0]);
-        loadMessages(others[0].username);
-      } else {
-        setIsLoading(false);
       }
+      setIsLoading(false);
     } catch (err) {
       console.error('Load users error:', err);
-      setIsLoading(false);
-    }
-  };
-
-  const loadMessages = async (withUser: string) => {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/messages/${currentUser?.username}/${withUser}`);
-      const data = await res.json();
-      
-      // Check if there are old messages
-      if (data.length > 0) {
-        setShowHistoryNotice(true);
-        // Clear old messages from database to start fresh
-        await fetch(`${BACKEND_URL}/api/messages/clear/${currentUser?.username}/${withUser}`, {
-          method: 'DELETE',
-        });
-      }
-      
-      // Only show new messages from this session
-      setMessages([]);
-      
-      // Auto-hide history notice after 3 seconds
-      setTimeout(() => {
-        setShowHistoryNotice(false);
-      }, 300000);
-      
-    } catch (err) {
-      console.error('Load messages error:', err);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -168,81 +134,127 @@ export default function ChatPage() {
       sock.emit('join', currentUser?.username);
     });
     
-    sock.on('receive_message', async (data: any) => {
-      try {
-        const { decryptMessage, getPrivateKey } = await import('@/src/utils/rsaKeys');
-        const privateKey = await getPrivateKey('kali');
-        const decryptedText = await decryptMessage(data.encryptedMessage, privateKey);
-        
-        setMessages(prev => [...prev, {
-          messageId: data.messageId,
-          fromUsername: data.from,
-          toUsername: currentUser?.username || '',
-          encryptedMessage: data.encryptedMessage,
-          decryptedText,
-          keySize: data.keySize,
-          timestamp: data.timestamp
-        }]);
-      } catch (err) {
-        console.error('Receive error:', err);
-      }
+   sock.on('receive_message', async (data: any) => {
+  const decryptionStartTime = performance.now();
+  
+
+  console.log(`   From: ${data.from}`);
+  console.log(`   To: ${currentUser?.username}`);
+  console.log(`   Key Size: ${data.keySize}-bit RSA`);
+  console.log(`   Encrypted message: "${data.encryptedMessage.substring(0, 50)}..."`);
+  
+  try {
+    const { decryptMessage, getPrivateKey } = await import('@/src/utils/rsaKeys');
+    const privateKey = await getPrivateKey('kali');
+    const decryptedText = await decryptMessage(data.encryptedMessage, privateKey);
+    
+    const decryptionTime = performance.now() - decryptionStartTime;
+    
+    console.log(`\n [DECRYPTION]`);
+    console.log(`   Using private key:  FOUND`);
+    console.log(`   Output: "${decryptedText}"`);
+    console.log(`   Time: ${decryptionTime.toFixed(2)}ms`);
+    
+    // Update metric with decryption time via API
+    const response = await fetch(`${BACKEND_URL}/api/metrics/update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messageId: data.messageId,
+        decryptionTime: decryptionTime
+      })
     });
+    
+    console.log(`\n [METRIC] Decryption time sent to server`);
+    console.log(`   Message decrypted successfully! `);
+    
+    setMessages(prev => [...prev, {
+      messageId: data.messageId,
+      fromUsername: data.from,
+      toUsername: currentUser?.username || '',
+      encryptedMessage: data.encryptedMessage,
+      decryptedText,
+      keySize: data.keySize,
+      timestamp: data.timestamp
+    }]);
+  } catch (err) {
+    console.error(' Receive error:', err);
+  }
+});
     
     setSocket(sock);
     
     return () => sock.disconnect();
   };
 
-  const sendMessage = async () => {
-    if (!inputMessage.trim() || !otherUser || !socket || !isConnected || isSending) return;
+ const sendMessage = async () => {
+  if (!inputMessage.trim() || !otherUser || !socket || !isConnected || isSending) return;
+  
+  setIsSending(true);
+  const encryptionStartTime = performance.now();
+  
+  const originalMessage = inputMessage;
+  console.log(`   From: ${currentUser?.username}`);
+  console.log(`   To: ${otherUser.username}`);
+  console.log(`   Original message: "${originalMessage}"`);
+  
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/auth/get-public-key?username=${otherUser.username}`);
+    const { publicKey } = await res.json();
     
-    setIsSending(true);
+    console.log(`   Recipient's public key: ${publicKey ? '✅ RECEIVED' : '❌ NOT FOUND'}`);
     
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/get-public-key?username=${otherUser.username}`);
-      const { publicKey } = await res.json();
-      
-      if (!publicKey) {
-        alert('Recipient not ready. Please wait.');
-        setIsSending(false);
-        return;
-      }
-      
-      const { encryptMessage } = await import('@/src/utils/rsaKeys');
-      const encrypted = await encryptMessage(inputMessage, publicKey);
-      
-      socket.emit('send_message', {
-        from: currentUser?.username,
-        to: otherUser.username,
-        encryptedMessage: encrypted,
-        keySize: 1024,
-        messageNumber: messages.length + 1,
-        encryptionTime: 0
-      });
-      
-      setMessages(prev => [...prev, {
-        messageId: `local_${Date.now()}`,
-        fromUsername: currentUser?.username || '',
-        toUsername: otherUser.username,
-        encryptedMessage: encrypted,
-        decryptedText: inputMessage,
-        keySize: 1024,
-        timestamp: new Date().toISOString()
-      }]);
-      
-      setInputMessage('');
-    } catch (err) {
-      console.error('Send error:', err);
-      alert('Failed to send message');
-    } finally {
+    if (!publicKey) {
+      alert('Recipient not ready. Please wait.');
       setIsSending(false);
+      return;
     }
-  };
+    
+    const { encryptMessage } = await import('@/src/utils/rsaKeys');
+    const encrypted = await encryptMessage(inputMessage, publicKey);
+    
+    const encryptionTime = performance.now() - encryptionStartTime;
+    
+    console.log(`\n [ENCRYPTION]`);
+    console.log(`   Input: "${originalMessage}"`);
+    console.log(`   Output: "${encrypted.substring(0, 50)}..."`);
+    console.log(`   Time: ${encryptionTime.toFixed(2)}ms`);
+    console.log(`   Key Size: 1024-bit RSA`);
+    
+    socket.emit('send_message', {
+      from: currentUser?.username,
+      to: otherUser.username,
+      encryptedMessage: encrypted,
+      keySize: 1024,
+      messageNumber: messages.length + 1,
+      encryptionTime: encryptionTime
+    });
+    
+    console.log(`\n [SENT] Encrypted message sent to server`);
+    console.log('═══════════════════════════════════════════════════════════\n');
+    
+    setMessages(prev => [...prev, {
+      messageId: `local_${Date.now()}`,
+      fromUsername: currentUser?.username || '',
+      toUsername: otherUser.username,
+      encryptedMessage: encrypted,
+      decryptedText: inputMessage,
+      keySize: 1024,
+      timestamp: new Date().toISOString()
+    }]);
+    
+    setInputMessage('');
+  } catch (err) {
+    console.error(' Send error:', err);
+    alert('Failed to send message');
+  } finally {
+    setIsSending(false);
+  }
+};
 
   const switchUser = async (user: User) => {
     setOtherUser(user);
     router.push(`/chat?id=${user.userId}`);
-    await loadMessages(user.username);
     if (window.innerWidth < 768) {
       setSidebarOpen(false);
     }
@@ -276,7 +288,6 @@ export default function ChatPage() {
         .dark-scrollbar::-webkit-scrollbar-thumb { background: ${COLOR}; border-radius: 10px; }
       `}</style>
 
-      {/* Mobile Sidebar Toggle */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
         className="md:hidden fixed top-4 left-4 z-50 p-2 rounded-lg transition-all"
@@ -289,7 +300,6 @@ export default function ChatPage() {
         {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
       </button>
 
-      {/* Theme Toggle */}
       <button
         onClick={toggleTheme}
         className="fixed top-4 right-4 z-50 p-2 rounded-lg transition-all"
@@ -365,7 +375,6 @@ export default function ChatPage() {
         <div className="flex-1 flex flex-col h-screen overflow-hidden">
           {otherUser ? (
             <>
-              {/* Chat Header */}
               <div className={`px-6 py-4 border-b flex-shrink-0 ${isDarkMode ? 'bg-black/30 border-white/10' : 'bg-white border-gray-200'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`}>
@@ -381,17 +390,6 @@ export default function ChatPage() {
                 </div>
               </div>
               
-              {/* History Notice */}
-              {showHistoryNotice && (
-                <div className={`mx-6 mt-4 p-3 rounded-lg flex items-center justify-center gap-2 ${
-                  isDarkMode ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-500' : 'bg-yellow-50 border border-yellow-200 text-yellow-600'
-                }`}>
-                  <History className="w-4 h-4" />
-                  <span className="text-xs font-medium">Previous messages are encrypted and cannot be recovered. New session started.</span>
-                </div>
-              )}
-              
-              {/* Messages Container */}
               <div 
                 className={`flex-1 overflow-y-auto p-6 space-y-4 ${isDarkMode ? 'dark-scrollbar' : 'light-scrollbar'}`}
                 style={{ scrollBehavior: 'smooth' }}
@@ -444,7 +442,6 @@ export default function ChatPage() {
                 <div ref={messagesEndRef} />
               </div>
               
-              {/* Input Area */}
               <div className={`p-4 border-t flex-shrink-0 ${isDarkMode ? 'bg-black/30 border-white/10' : 'bg-white border-gray-200'}`}>
                 <div className="flex items-center gap-3">
                   <input

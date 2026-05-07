@@ -22,13 +22,10 @@ app.use(express.json());
 
 const MONGODB_URI = process.env.MONGODB_URI;
 
-console.log('==========================================');
-console.log('🚀 SECURE CHAT BACKEND STARTING');
-console.log('==========================================');
 
 mongoose.connect(MONGODB_URI, { dbName: 'cryptchat' })
-  .then(() => console.log('✅ MongoDB connected to cryptchat'))
-  .catch(err => console.error('❌ MongoDB error:', err.message));
+  .then(() => console.log(' MongoDB connected to cryptchat'))
+  .catch(err => console.error(' MongoDB error:', err.message));
 
 // ==================== SCHEMAS ====================
 const userSchema = new mongoose.Schema({
@@ -60,8 +57,9 @@ const metricSchema = new mongoose.Schema({
   messageId: String,
   keySize: Number,
   encryptionTime: Number,
-  decryptionTime: Number,
-  transmissionTime: Number,
+  decryptionTime: { type: Number, default: 0 },
+  transmissionTime: { type: Number, default: 0 },
+  totalTime: { type: Number, default: 0 },
   timestamp: { type: Date, default: Date.now }
 });
 
@@ -91,7 +89,7 @@ app.post('/api/auth/generate-keys', async (req, res) => {
     { username },
     { $set: { publicKey, lastKeySize: keySize }, $inc: { loginCount: 1 } }
   );
-  console.log(`✅ Keys saved for ${username} (${keySize}-bit RSA)`);
+  console.log(` Keys saved for ${username} (${keySize}-bit RSA)`);
   res.json({ success: true });
 });
 
@@ -113,54 +111,115 @@ app.get('/api/metrics', async (req, res) => {
   res.json(metrics);
 });
 
+app.post('/api/metrics/update', async (req, res) => {
+  const { messageId, decryptionTime } = req.body;
+  
+  console.log('\n═══════════════════════════════════════════════════════════');
+  console.log('🔓 DECRYPTION METRIC RECEIVED');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log(`   Message ID: ${messageId}`);
+  console.log(`   Decryption Time: ${decryptionTime?.toFixed(2) || 0}ms`);
+  
+  try {
+    const metric = await Metric.findOne({ messageId: messageId });
+    
+    if (metric) {
+      metric.decryptionTime = decryptionTime;
+      metric.totalTime = (metric.encryptionTime || 0) + (metric.transmissionTime || 0) + decryptionTime;
+      await metric.save();
+      
+      console.log(`\n✅ [METRIC UPDATED] Complete timing:`);
+      console.log(`   🔐 Encryption: ${metric.encryptionTime?.toFixed(2) || 0}ms`);
+      console.log(`   🌐 Transmission: ${metric.transmissionTime || 0}ms`);
+      console.log(`   🔓 Decryption: ${decryptionTime?.toFixed(2) || 0}ms`);
+      console.log(`   ⏱️ Total: ${metric.totalTime?.toFixed(2) || 0}ms`);
+      console.log('═══════════════════════════════════════════════════════════\n');
+      
+      res.json({ success: true, metric });
+    } else {
+      console.log('❌ Metric not found!');
+      res.json({ success: false, error: 'Metric not found' });
+    }
+  } catch (err) {
+    console.error('Error updating metric:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// Get message statistics
+app.get('/api/messages/stats', async (req, res) => {
+  const messages = await Message.find().sort({ timestamp: -1 }).limit(100);
+  res.json(messages);
+});
 // ==================== SOCKET.IO ====================
 io.on('connection', (socket) => {
   console.log('✅ Client connected:', socket.id);
   
   socket.on('join', (username) => {
     socket.join(username);
-    console.log(`📡 ${username} joined secure channel`);
+    console.log(` ${username} joined secure channel`);
   });
   
   socket.on('send_message', async (data) => {
-    console.log(`📨 RSA Encrypted: ${data.from} → ${data.to} (${data.keySize}-bit)`);
-    
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    const message = new Message({
-      messageId,
-      fromUsername: data.from,
-      toUsername: data.to,
-      encryptedMessage: data.encryptedMessage,
-      keySize: data.keySize,
-      messageNumber: data.messageNumber,
-      encryptionTime: data.encryptionTime
-    });
-    await message.save();
-    
-    const metric = new Metric({
-      metricId: `met_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      messageId,
-      keySize: data.keySize,
-      encryptionTime: data.encryptionTime,
-      transmissionTime: 5
-    });
-    await metric.save();
-    
-    io.to(data.to).emit('receive_message', {
-      messageId,
-      from: data.from,
-      encryptedMessage: data.encryptedMessage,
-      keySize: data.keySize,
-      messageNumber: data.messageNumber,
-      timestamp: new Date()
-    });
-    
-    console.log(`📤 Forwarded to ${data.to}`);
+  const startTime = Date.now();
+  
+  console.log('\n═══════════════════════════════════════════════════════════');
+  console.log(' MESSAGE FLOW - ENCRYPTED MESSAGE RECEIVED');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log(`   From: ${data.from}`);
+  console.log(`   To: ${data.to}`);
+  console.log(`   Key Size: ${data.keySize}-bit RSA`);
+  console.log(`   Encryption Time: ${data.encryptionTime?.toFixed(2) || 0}ms`);
+  console.log(`   Encrypted Message: ${data.encryptedMessage.substring(0, 50)}...`);
+  console.log('═══════════════════════════════════════════════════════════\n');
+  
+  const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  // Save message
+  const message = new Message({
+    messageId,
+    fromUsername: data.from,
+    toUsername: data.to,
+    encryptedMessage: data.encryptedMessage,
+    keySize: data.keySize,
+    messageNumber: data.messageNumber,
+    encryptionTime: data.encryptionTime || 0
+  });
+  await message.save();
+  console.log(` [DATABASE] Message saved to MongoDB (ID: ${messageId})`);
+  
+  // Calculate transmission time
+  const transmissionTime = Date.now() - startTime;
+  
+  // Save metric
+  const metric = new Metric({
+    metricId: `met_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    messageId,
+    keySize: data.keySize,
+    encryptionTime: data.encryptionTime || 0,
+    transmissionTime: transmissionTime,
+    timestamp: new Date()
+  });
+  await metric.save();
+  console.log(` [METRIC] Saved - Enc: ${(data.encryptionTime || 0).toFixed(2)}ms, Trans: ${transmissionTime}ms`);
+  
+  // Forward to recipient
+  io.to(data.to).emit('receive_message', {
+    messageId,
+    from: data.from,
+    encryptedMessage: data.encryptedMessage,
+    keySize: data.keySize,
+    messageNumber: data.messageNumber,
+    encryptionTime: data.encryptionTime || 0,
+    timestamp: new Date()
   });
   
+  console.log(`\n [FORWARD] Encrypted message forwarded to ${data.to}`);
+  console.log(`   Ciphertext: ${data.encryptedMessage.substring(0, 50)}...`);
+  console.log('═══════════════════════════════════════════════════════════\n');
+});
+  
   socket.on('disconnect', () => {
-    console.log('❌ Client disconnected:', socket.id);
+    console.log(' Client disconnected:', socket.id);
   });
 });
 
@@ -169,9 +228,8 @@ async function initDatabase() {
   const count = await User.countDocuments();
   
   if (count === 0) {
-    console.log('📝 Creating users with HASHED passwords...');
+    console.log(' Creating users with HASHED passwords...');
     
-    // ✅ This is the bcrypt hash for password "kali"
     const hashedPassword = "$2a$10$N9qo8uLOickgx2ZMRZoMy.MrYJYqE5KqXvJ9qVqXvJ9qVqXvJ9q";
     
     await User.insertMany([
@@ -179,7 +237,7 @@ async function initDatabase() {
         userId: "USER_001", 
         username: "Karima", 
         email: "karima@cryptchat.com", 
-        passwordHash: hashedPassword,  // ✅ HASHED!
+        passwordHash: hashedPassword,
         role: "user", 
         publicKey: null 
       },
@@ -187,7 +245,7 @@ async function initDatabase() {
         userId: "USER_002", 
         username: "Nour", 
         email: "nour@cryptchat.com", 
-        passwordHash: hashedPassword,  // ✅ HASHED!
+        passwordHash: hashedPassword,
         role: "user", 
         publicKey: null 
       },
@@ -195,36 +253,23 @@ async function initDatabase() {
         userId: "ADMIN_001", 
         username: "admin", 
         email: "admin@cryptchat.com", 
-        passwordHash: hashedPassword,  // ✅ HASHED!
+        passwordHash: hashedPassword,
         role: "admin", 
         publicKey: null 
       }
     ]);
     
-    console.log('✅ Created Karima, Nour, admin with HASHED passwords');
+    console.log(' Created Karima, Nour, admin with HASHED passwords');
   } else {
-    console.log(`✅ Database already has ${count} users`);
-    
-    // Optional: Fix any users with plain text passwords
-    const users = await User.find({});
-    for (const user of users) {
-      if (user.passwordHash && !user.passwordHash.startsWith('$2a$')) {
-        console.log(`⚠️ Fixing plain text password for ${user.username}`);
-        await User.updateOne(
-          { username: user.username },
-          { $set: { passwordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMy.MrYJYqE5KqXvJ9qVqXvJ9qVqXvJ9q" } }
-        );
-      }
-    }
+    console.log(` Database already has ${count} users`);
   }
 }
 
 mongoose.connection.once('open', async () => {
   await initDatabase();
   
-  // Show current users
   const users = await User.find({}, 'username passwordHash');
-  console.log('📋 Current users:');
+  console.log(' Current users:');
   users.forEach(u => {
     const isHashed = u.passwordHash?.startsWith('$2a$');
     console.log(`   - ${u.username}: ${isHashed ? '✅ hashed' : '❌ plain text'}`);
@@ -233,5 +278,5 @@ mongoose.connection.once('open', async () => {
 
 const PORT = 3001;
 server.listen(PORT, () => {
-  console.log(`🚀 Server: http://localhost:${PORT}`);
+  console.log(` Server: http://localhost:${PORT}`);
 });

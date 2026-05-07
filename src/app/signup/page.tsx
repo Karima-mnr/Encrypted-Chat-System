@@ -49,13 +49,11 @@ export default function SignUpPage() {
       if (res.ok) {
         setSuccess(true);
         
-        // Generate RSA keys automatically after signup
         try {
           const { generateKeyPair, storePrivateKey } = await import('@/src/utils/rsaKeys');
           const { publicKey, privateKey } = await generateKeyPair(1024);
           await storePrivateKey(privateKey, password);
           
-          // Save public key to backend
           await fetch('/api/auth/generate-keys', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -69,7 +67,6 @@ export default function SignUpPage() {
           console.error('Key generation error:', keyErr);
         }
         
-        // Auto redirect to login after 2 seconds
         setTimeout(() => {
           router.push('/login');
         }, 2000);

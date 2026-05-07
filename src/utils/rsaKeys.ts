@@ -1,7 +1,4 @@
-// src/utils/rsaKeys.ts
-// COMPLETE WORKING RSA ENCRYPTION
 
-// Safe Base64 encoding
 function toBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -11,7 +8,6 @@ function toBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-// Safe Base64 decoding
 function fromBase64(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -21,7 +17,6 @@ function fromBase64(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-// Generate RSA key pair
 export async function generateKeyPair(keySize: number = 1024) {
   const keyPair = await crypto.subtle.generateKey(
     {
@@ -43,9 +38,7 @@ export async function generateKeyPair(keySize: number = 1024) {
   };
 }
 
-// Store private key (encrypted with password)
 export async function storePrivateKey(privateKey: string, password: string): Promise<void> {
-  // Simple XOR encryption for localStorage (reversible)
   let encrypted = '';
   for (let i = 0; i < privateKey.length; i++) {
     encrypted += String.fromCharCode(privateKey.charCodeAt(i) ^ password.charCodeAt(i % password.length));
@@ -53,7 +46,6 @@ export async function storePrivateKey(privateKey: string, password: string): Pro
   localStorage.setItem('cryptchat_private_key', btoa(encrypted));
 }
 
-// Get private key from storage
 export async function getPrivateKey(password: string): Promise<string> {
   const encrypted = localStorage.getItem('cryptchat_private_key');
   if (!encrypted) throw new Error('No private key found');
@@ -66,7 +58,6 @@ export async function getPrivateKey(password: string): Promise<string> {
   return privateKey;
 }
 
-// Encrypt message
 export async function encryptMessage(message: string, publicKeyBase64: string): Promise<string> {
   if (!publicKeyBase64 || publicKeyBase64 === 'null' || publicKeyBase64.length < 50) {
     throw new Error('Invalid public key');
@@ -90,7 +81,6 @@ export async function encryptMessage(message: string, publicKeyBase64: string): 
   return toBase64(encrypted);
 }
 
-// Decrypt message
 export async function decryptMessage(encryptedBase64: string, privateKeyBase64: string): Promise<string> {
   if (!encryptedBase64 || !privateKeyBase64) {
     throw new Error('Missing encrypted message or private key');

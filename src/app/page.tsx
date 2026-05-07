@@ -29,7 +29,6 @@ import {
 
 const COLOR = '#b8d490';
 
-// Animated Background - Now adapts to theme
 function AnimatedBackground({ isDarkMode }: { isDarkMode: boolean }) {
   return (
     <div className="fixed inset-0 -z-10 overflow-hidden">
@@ -64,7 +63,6 @@ function AnimatedBackground({ isDarkMode }: { isDarkMode: boolean }) {
   );
 }
 
-// Live Chat Demo Component - Adapts to theme
 function LiveChatDemo({ isDarkMode }: { isDarkMode: boolean }) {
   const [messages, setMessages] = useState<any[]>([]);
   const [step, setStep] = useState(0);
@@ -389,7 +387,7 @@ export default function LandingPage() {
               </div>
               <h1 className="text-5xl md:text-6xl font-bold leading-tight tracking-tight">
                 Secure Messaging,
-                <span className="block mt-2" style={{ color: COLOR }}>Engineered Like Linux.</span>
+                <span className="block mt-2" style={{ color: COLOR }}>Encrypted Before You Send.</span>
               </h1>
               <p className={`mt-6 text-base leading-relaxed max-w-lg ${isDarkMode ? 'text-white/45' : 'text-gray-500'}`}>
                 Real-time encrypted chat with progressive RSA key expansion. Messages encrypted in-browser, transmitted as ciphertext, decrypted only by recipient.

@@ -20,26 +20,18 @@ export default function LoginPage() {
     setIsLoading(true);
     setError('');
 
-    console.log('📤 Sending login request for:', username);
-
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
 
       const data = await res.json();
-      console.log('📥 Response:', data);
 
       if (res.ok && data.success) {
-        // Store user data
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
-        
-        console.log('✅ Login success, redirecting...');
         
         // Redirect based on role
         if (data.user.role === 'admin') {
@@ -51,7 +43,6 @@ export default function LoginPage() {
         setError(data.error || 'Login failed');
       }
     } catch (err) {
-      console.error('❌ Login error:', err);
       setError('Connection error. Please try again.');
     } finally {
       setIsLoading(false);
@@ -123,11 +114,6 @@ export default function LoginPage() {
                 {error}
               </div>
             )}
-
-            <div className="text-center text-xs text-white/30">
-              <p>Demo Users: Karima / Nour / admin</p>
-              <p className="text-[10px] mt-1">Password: kali</p>
-            </div>
 
             <button
               type="submit"

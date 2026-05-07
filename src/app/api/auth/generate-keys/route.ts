@@ -9,13 +9,11 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { userId, username, publicKey, keySize } = body;
 
-    console.log('==========================================');
-    console.log('📝 API CALLED: /api/auth/generate-keys');
+    console.log(' API CALLED: /api/auth/generate-keys');
     console.log('   userId:', userId);
     console.log('   username:', username);
     console.log('   keySize:', keySize);
     console.log('   publicKey length:', publicKey?.length);
-    console.log('==========================================');
 
     if (!publicKey) {
       return NextResponse.json({ error: 'Public key required' }, { status: 400 });
@@ -36,7 +34,7 @@ export async function POST(req: NextRequest) {
     user.loginCount = (user.loginCount || 0) + 1;
     await user.save();
 
-    console.log('✅ Updated user:', user.username);
+    console.log(' Updated user:', user.username);
     console.log('   publicKey saved:', !!user.publicKey);
     console.log('   lastKeySize:', user.lastKeySize);
     console.log('   loginCount:', user.loginCount);

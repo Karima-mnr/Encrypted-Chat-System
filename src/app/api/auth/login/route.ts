@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '@/src/lib/mongodb';
 import User from '@/src/models/User';
-import bcrypt from 'bcryptjs';  // Use bcryptjs (already installed)
+import bcrypt from 'bcryptjs';  
 import jwt from 'jsonwebtoken';
 
 export async function POST(req: NextRequest) {
@@ -19,7 +19,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // bcryptjs works with $2a$ hashes
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
 
     if (!isValidPassword) {

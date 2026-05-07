@@ -9,9 +9,8 @@ export async function POST(req: NextRequest) {
     
     const { username, email, password } = await req.json();
 
-    console.log('📝 Signup attempt:', { username, email });
+    console.log(' Signup attempt:', { username, email });
 
-    // Validation
     if (!username || !email || !password) {
       return NextResponse.json(
         { error: 'All fields are required' },
@@ -26,7 +25,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if user exists
     const existingUser = await User.findOne({ 
       $or: [{ username }, { email }] 
     });
@@ -44,15 +42,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Hash password with bcrypt
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Get next user ID
     const userCount = await User.countDocuments();
     const userId = `USER_${String(userCount + 1).padStart(3, '0')}`;
 
-    // Create new user
     const newUser = await User.create({
       userId: userId,
       username: username,
@@ -67,8 +62,8 @@ export async function POST(req: NextRequest) {
       isActive: true
     });
 
-    console.log('✅ User created:', newUser.username);
-    console.log('📦 Password hash stored:', newUser.passwordHash);
+    console.log(' User created:', newUser.username);
+    console.log(' Password hash stored:', newUser.passwordHash);
 
     return NextResponse.json({
       success: true,
